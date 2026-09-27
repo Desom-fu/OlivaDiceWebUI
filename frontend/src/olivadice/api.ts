@@ -1,7 +1,9 @@
 export type Account = { hash: string; label: string; platform: string; model: string; id: string };
 export type Setting = { key: string; section: string; label: string; description: string; value: number; min: number; max: number; custom?: boolean };
 export type Reply = { key: string; value: string; note: string; modified: boolean; default: string | null };
-export type HelpDoc = { key: string; value: string; custom: boolean };
+export type HelpDoc = { key: string; value: string; custom: boolean; modified: boolean; default: string | null };
+export type AccountRelation = { master: string; slave: string; masterOnline: boolean; slaveOnline: boolean };
+export type Relations = { available: boolean; accountHashes: string[]; relations: AccountRelation[] };
 export type Deck = { name: string; groups: string[]; count: number };
 export type Master = { id: string; platform: string };
 export type BackupState = { available: boolean; settings: { isBackup: number | null; startDate: string | null; passDay: number | null; backupTime: string | null; maxBackupCount: number | null } };

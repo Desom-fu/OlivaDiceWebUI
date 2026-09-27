@@ -64,6 +64,50 @@ def _check_account(proc, bot_hash, allow_unity=True):
         raise InvalidInput('账号不存在')
 
 
+def _offline_master_hashes(proc):
+    if not _master_installed(proc):
+        return set()
+    try:
+        current = _core().console.getAllAccountRelations()
+    except Exception:
+        return set()
+    bots = _bots(proc)
+    return {master for master, slaves in current.items()
+            if isinstance(master, str) and master not in bots and isinstance(slaves, list) and slaves}
+
+
+def _check_help_account(proc, bot_hash):
+    if isinstance(bot_hash, str) and bot_hash != 'unity' and bot_hash in _offline_master_hashes(proc):
+        return
+    _check_account(proc, bot_hash, False)
+
+
+def _ensure_help_loaded(core, bot_hash):
+    data = getattr(core, 'helpDocData', None)
+    if data is None:
+        return
+    values = data.dictHelpDoc.get(bot_hash)
+    custom = data.dictHelpDocDefault.get(bot_hash)
+    if isinstance(values, dict) and isinstance(custom, dict):
+        return
+    template = getattr(data, 'dictHelpDocTemp', None)
+    loaded_values = dict(template) if isinstance(template, dict) else {}
+    loaded_custom = {}
+    try:
+        path = Path(core.data.dataDirRoot) / bot_hash / 'console' / 'helpdocDefault.json'
+        raw = json.loads(path.read_text(encoding='utf-8'))
+        if isinstance(raw, dict):
+            loaded_custom = {key: value for key, value in raw.items()
+                             if isinstance(key, str) and isinstance(value, str)}
+            loaded_values.update(loaded_custom)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    if not isinstance(values, dict):
+        data.dictHelpDoc[bot_hash] = loaded_values
+    if not isinstance(custom, dict):
+        data.dictHelpDocDefault[bot_hash] = loaded_custom
+
+
 def _save_value(mapping, key, value, save):
     old = copy.deepcopy(mapping[key])
     mapping[key] = value
@@ -268,35 +312,130 @@ def change_relation(proc, action, slave, master=None):
         return relations(proc)
 
 
+def _help_store(core, bot_hash):
+    data = getattr(core, 'helpDocData', None)
+    help_mod = getattr(core, 'helpDoc', None)
+    if data is None or help_mod is None:
+        raise InvalidInput('帮助文档未加载')
+    _ensure_help_loaded(core, bot_hash)
+    values = data.dictHelpDoc.setdefault(bot_hash, {})
+    custom = data.dictHelpDocDefault.setdefault(bot_hash, {})
+    if not isinstance(values, dict) or not isinstance(custom, dict):
+        raise InvalidInput('帮助文档数据无效')
+    return data, help_mod, values, custom
+
+
+def _save_help_docs(help_mod, bot_hash):
+    save = getattr(help_mod, 'saveHelpDocByBotHash', None)
+    if callable(save):
+        save(bot_hash)
+
+
+def _merge_help_files(defaults, directory):
+    path = Path(directory)
+    if not path.is_dir():
+        return
+    for file in path.iterdir():
+        if not file.is_file():
+            continue
+        try:
+            payload = json.loads(file.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        values = payload.get('helpdoc') if isinstance(payload, dict) else None
+        if not isinstance(values, dict):
+            continue
+        for key, value in values.items():
+            if isinstance(key, str) and isinstance(value, str):
+                defaults[key] = value
+
+
+def _help_defaults(core, bot_hash):
+    data = getattr(core, 'helpDocData', None)
+    template = getattr(data, 'dictHelpDocTemp', None) if data is not None else None
+    defaults = {key: value for key, value in template.items()
+                if isinstance(key, str) and isinstance(value, str)} if isinstance(template, dict) else {}
+    root = Path(getattr(getattr(core, 'data', None), 'dataDirRoot', '') or '.')
+    _merge_help_files(defaults, root / 'unity' / 'extend' / 'helpdoc')
+    _merge_help_files(defaults, root / bot_hash / 'extend' / 'helpdoc')
+    return defaults
+
+
 def help_docs(proc, bot_hash):
-    _check_account(proc, bot_hash, False)
+    _check_help_account(proc, bot_hash)
     with LOCK:
         core = _core()
         data = getattr(core, 'helpDocData', None)
         if data is None:
             return []
-        content_hash = _content_hash(core, bot_hash)
-        values = data.dictHelpDoc.get(content_hash, {})
-        custom = data.dictHelpDocDefault.get(content_hash, {})
-        return [{'key': key, 'value': value, 'custom': key in custom}
-                for key, value in values.items() if isinstance(key, str) and isinstance(value, str)]
+        _ensure_help_loaded(core, bot_hash)
+        values = data.dictHelpDoc.get(bot_hash, {})
+        custom = data.dictHelpDocDefault.get(bot_hash, {})
+        if not isinstance(values, dict):
+            return []
+        if not isinstance(custom, dict):
+            custom = {}
+        defaults = _help_defaults(core, bot_hash)
+        result = []
+        for key, value in values.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+            default = defaults.get(key)
+            default = default if isinstance(default, str) else None
+            result.append({
+                'key': key, 'value': value, 'custom': key in custom,
+                'modified': default is None or value != default, 'default': default,
+            })
+        return result
+
+
+def export_help_docs(proc, bot_hash):
+    return {item['key']: item['value'] for item in help_docs(proc, bot_hash) if item['custom']}
+
+
+def _help_import_payload(data):
+    if not isinstance(data, dict):
+        raise InvalidInput('帮助文档必须是 JSON 对象')
+    incoming = data['helpdoc'] if isinstance(data.get('helpdoc'), dict) else data
+    if len(incoming) > 5000:
+        raise InvalidInput('帮助文档条目过多')
+    for key, value in incoming.items():
+        if (not isinstance(key, str) or not key.strip() or len(key) > 100
+                or not isinstance(value, str) or len(value) > 20000):
+            raise InvalidInput('帮助词条格式无效')
+    return incoming
+
+
+def import_help_docs(proc, bot_hash, data):
+    incoming = _help_import_payload(data)
+    _check_help_account(proc, bot_hash)
+    with LOCK:
+        _, help_mod, values, custom = _help_store(_core(), bot_hash)
+        for key, value in incoming.items():
+            name = key.strip()
+            custom[name] = value
+            values[name] = value
+        _save_help_docs(help_mod, bot_hash)
+        return dict(custom)
 
 
 def set_help_doc(proc, bot_hash, key, value=None, delete=False):
-    _check_account(proc, bot_hash, False)
+    _check_help_account(proc, bot_hash)
     if not isinstance(key, str) or not key.strip() or len(key) > 100 or (not delete and (not isinstance(value, str) or len(value) > 20000)):
         raise InvalidInput('帮助词条格式无效')
     with LOCK:
-        core = _core()
-        if not hasattr(core, 'helpDocData') or not hasattr(core, 'helpDoc'):
-            raise InvalidInput('帮助文档未加载')
-        custom = core.helpDocData.dictHelpDocDefault.get(_content_hash(core, bot_hash), {})
+        _, help_mod, values, custom = _help_store(_core(), bot_hash)
+        name = key.strip()
         if delete:
-            if key not in custom:
+            if name not in custom:
                 raise InvalidInput('只能删除自定义词条')
-            core.helpDoc.delHelpDocByBotHash(bot_hash, key)
+            custom.pop(name, None)
+            values.pop(name, None)
+            _save_help_docs(help_mod, bot_hash)
             return None
-        core.helpDoc.setHelpDocByBotHash(bot_hash, key.strip(), value)
+        custom[name] = value
+        values[name] = value
+        _save_help_docs(help_mod, bot_hash)
         return value
 
 

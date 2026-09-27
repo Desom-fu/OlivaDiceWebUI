@@ -9,7 +9,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from publish_release import beijing_day, identify_archive, next_build_number, reserve_tag, stamp_archive
+from publish_release import beijing_day, identify_archive, next_build_number, parse_release_version, release_svn, release_version, reserve_tag, stamp_archive
 import package as package_script
 import publish_release
 
@@ -17,8 +17,11 @@ import publish_release
 class ReleaseVersionTest(unittest.TestCase):
     def test_beijing_day_and_daily_sequence(self):
         self.assertEqual(beijing_day(datetime(2026, 9, 17, 17, tzinfo=timezone.utc)), '20260918')
-        refs = ['refs/tags/v20260918(1)', 'refs/tags/v20260918(3)',
-                'refs/tags/v20260917(8)', 'refs/tags/v20260918-draft']
+        self.assertEqual(release_version('20260918', 2), '26.0918.02')
+        self.assertEqual(release_svn('20260918', 2), 2026091802)
+        self.assertEqual(parse_release_version('26.0918.02'), ('26.0918.02', 2026091802))
+        refs = ['refs/tags/v26.0918.01', 'refs/tags/v26.0918.03',
+                'refs/tags/v26.0917.08', 'refs/tags/v20260918(1)', 'refs/tags/v26.0918-draft']
         self.assertEqual(next_build_number(refs, '20260918'), 4)
         self.assertEqual(next_build_number(refs, '20260919'), 1)
 
@@ -29,14 +32,17 @@ class ReleaseVersionTest(unittest.TestCase):
                 archive.writestr('app.json', json.dumps({
                     'namespace': 'OlivaDiceWebUI', 'version': 'dev'}))
                 archive.writestr('main.py', 'print("ok")')
-            stamped = stamp_archive(original, '20260918(2)')
+            stamped = stamp_archive(original, '26.0918.02')
             self.assertEqual(stamped.name, 'OlivaDiceWebUI.opk')
             with ZipFile(stamped) as archive:
-                self.assertEqual(json.loads(archive.read('app.json'))['version'], '20260918(2)')
+                manifest = json.loads(archive.read('app.json'))
+                self.assertEqual(manifest['version'], '26.0918.02')
+                self.assertEqual(manifest['svn'], 2026091802)
                 self.assertEqual(archive.read('main.py'), b'print("ok")')
-            self.assertEqual(stamp_archive(stamped, '20260918(2)'), stamped)
+            self.assertEqual(stamp_archive(stamped, '26.0918.02'), stamped)
             with ZipFile(stamped) as archive:
-                self.assertEqual(json.loads(archive.read('app.json'))['version'], '20260918(2)')
+                self.assertEqual(json.loads(archive.read('app.json'))['version'], '26.0918.02')
+                self.assertEqual(json.loads(archive.read('app.json'))['svn'], 2026091802)
 
     def test_standalone_opk_uses_same_release_version(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -49,21 +55,23 @@ class ReleaseVersionTest(unittest.TestCase):
             self.assertEqual(namespace, 'OlivaDiceWebUIStandalone')
             self.assertEqual(base_name, 'OlivaDiceWebUIStandalone')
             self.assertIn('独立服务版', label)
-            stamped = stamp_archive(original, '20260918(2)')
+            stamped = stamp_archive(original, '26.0918.02')
             self.assertEqual(stamped.name, 'OlivaDiceWebUIStandalone.opk')
             with ZipFile(stamped) as archive:
-                self.assertEqual(json.loads(archive.read('app.json'))['version'], '20260918(2)')
+                manifest = json.loads(archive.read('app.json'))
+                self.assertEqual(manifest['version'], '26.0918.02')
+                self.assertEqual(manifest['svn'], 2026091802)
                 self.assertEqual(archive.read('main.py'), b'print("standalone")')
-            self.assertEqual(stamp_archive(stamped, '20260918(2)'), stamped)
+            self.assertEqual(stamp_archive(stamped, '26.0918.02'), stamped)
             with ZipFile(stamped) as archive:
-                self.assertEqual(json.loads(archive.read('app.json'))['version'], '20260918(2)')
+                self.assertEqual(json.loads(archive.read('app.json'))['version'], '26.0918.02')
 
     def test_reservation_moves_to_next_number_after_collision(self):
-        results = [SimpleNamespace(stdout='refs/tags/v20260918(1)\n', returncode=0),
+        results = [SimpleNamespace(stdout='refs/tags/v26.0918.01\n', returncode=0),
                    SimpleNamespace(stderr='already exists', returncode=1),
                    SimpleNamespace(returncode=0), SimpleNamespace(returncode=0)]
         with patch('publish_release.gh', side_effect=results):
-            self.assertEqual(reserve_tag('owner/repo', '012345', '20260918'), 'v20260918(3)')
+            self.assertEqual(reserve_tag('owner/repo', '012345', '20260918'), 'v26.0918.03')
 
     def test_single_source_builds_two_self_contained_plugins(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -111,14 +119,14 @@ class ReleaseVersionTest(unittest.TestCase):
             result = SimpleNamespace(stdout='https://example.test/release')
             with patch.object(sys, 'argv', ['publish_release.py', str(official), str(standalone)]), \
                     patch.dict('os.environ', {'GITHUB_REPOSITORY': 'owner/repo', 'GITHUB_SHA': 'abc123'}), \
-                    patch('publish_release.reserve_tag', return_value='v20260920(1)'), \
+                    patch('publish_release.reserve_tag', return_value='v26.0920.01'), \
                     patch('publish_release.gh', return_value=result) as mocked_gh:
                 publish_release.main()
             args = mocked_gh.call_args.args
-            self.assertEqual(args[:3], ('release', 'create', 'v20260920(1)'))
-            self.assertTrue(any('OlivaDiceWebUI.opk#OlivaDice WebUI（官方接入版） v20260920(1)' in value
+            self.assertEqual(args[:3], ('release', 'create', 'v26.0920.01'))
+            self.assertTrue(any('OlivaDiceWebUI.opk#OlivaDice WebUI（官方接入版） v26.0920.01' in value
                                 for value in args))
-            self.assertTrue(any('OlivaDiceWebUIStandalone.opk#OlivaDice WebUI（独立服务版） v20260920(1)' in value
+            self.assertTrue(any('OlivaDiceWebUIStandalone.opk#OlivaDice WebUI（独立服务版） v26.0920.01' in value
                                 for value in args))
 
 

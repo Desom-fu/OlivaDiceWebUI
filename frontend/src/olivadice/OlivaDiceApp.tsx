@@ -3,7 +3,7 @@ import { Archive, ArrowRight, Blocks, BookOpenText, Bot, Files, Globe2, LayoutDa
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { api, botQuery, standalone, type Account, type Deck, type HelpDoc, type Reply, type Setting } from './api';
+import { api, botQuery, standalone, type Account, type Deck, type HelpDoc, type Relations, type Reply, type Setting } from './api';
 import { Notice, SectionTitle, Select, useConfirm } from './ui';
 import { AccountsPage } from './pages/AccountsPage';
 import { BackupPage } from './pages/BackupPage';
@@ -91,6 +91,7 @@ export function OlivaDiceApp() {
   const [connected, setConnected] = React.useState(false);
   const [version, setVersion] = React.useState('');
   const [accounts, setAccounts] = React.useState<Account[]>([]);
+  const [relations, setRelations] = React.useState<Relations>({ available: false, accountHashes: [], relations: [] });
   const [bot, setBot] = React.useState(() => standalone ? sessionStorage.getItem('olivadice-bot') || 'unity' : 'unity');
   const [view, setView] = React.useState<View>(initialView);
   const [navLayout, setNavLayout] = React.useState<NavLayout>(() => readPreference('layout', ['top', 'side'], standalone ? 'side' : 'top'));
@@ -101,19 +102,54 @@ export function OlivaDiceApp() {
   const dirty = React.useRef(false);
   const connectedOnce = React.useRef(false);
   const viewRef = React.useRef(view);
+  const botRef = React.useRef(bot);
+  const accountsRef = React.useRef(accounts);
+  const helpReturnBot = React.useRef('');
   const onDirtyChange = React.useCallback((value: boolean) => { dirty.current = value; }, []);
   const notify = React.useCallback((message: string, error = false) => setNotice({ message, error }), []);
-  const connect = React.useCallback(async (key: string) => { setLoading(true); try { const result = await api<{ accounts: Account[]; version: string }>('/api/accounts', key); setAccounts(result.accounts); setVersion(result.version); const stored = standalone ? sessionStorage.getItem('olivadice-bot') : null; const next = stored && result.accounts.some(item => item.hash === stored) ? stored : result.accounts.find(item => item.hash !== 'unity')?.hash || 'unity'; setBot(current => connectedOnce.current && result.accounts.some(item => item.hash === current) ? current : next); connectedOnce.current = true; if (standalone) { sessionStorage.setItem('olivadice-bot', next); sessionStorage.setItem('olivadice-token', key); setToken(key); } setConnected(true); notify(''); } catch (cause) { if (standalone) sessionStorage.removeItem('olivadice-token'); setConnected(false); notify((cause as Error).message, true); } finally { setLoading(false); } }, [notify]);
+  const connect = React.useCallback(async (key: string) => { setLoading(true); try { const result = await api<{ accounts: Account[]; version: string }>('/api/accounts', key); setAccounts(result.accounts); setVersion(result.version); try { setRelations(await api<Relations>('/api/relations', key)); } catch { setRelations({ available: false, accountHashes: [], relations: [] }); } const stored = standalone ? sessionStorage.getItem('olivadice-bot') : null; const next = stored && result.accounts.some(item => item.hash === stored) ? stored : result.accounts.find(item => item.hash !== 'unity')?.hash || 'unity'; setBot(current => { if (connectedOnce.current && result.accounts.some(item => item.hash === current)) return current; if (connectedOnce.current && viewRef.current === 'help' && helpReturnBot.current) return current; return next; }); connectedOnce.current = true; if (standalone) { sessionStorage.setItem('olivadice-bot', next); sessionStorage.setItem('olivadice-token', key); setToken(key); } setConnected(true); notify(''); } catch (cause) { if (standalone) sessionStorage.removeItem('olivadice-token'); setConnected(false); notify((cause as Error).message, true); } finally { setLoading(false); } }, [notify]);
   React.useEffect(() => { if (!preview && (!standalone || token)) void connect(token); else if (!standalone) notify('请从 OlivOS WebUI 的「插件页面」打开青果骰管理。', true); }, []);
   React.useEffect(() => { viewRef.current = view; }, [view]);
+  React.useEffect(() => { botRef.current = bot; }, [bot]);
+  React.useEffect(() => { accountsRef.current = accounts; }, [accounts]);
   React.useEffect(() => { document.documentElement.classList.toggle('dark', theme === 'dark'); document.documentElement.style.colorScheme = theme; writePreference('theme', theme); }, [theme]);
   React.useEffect(() => { writePreference('layout', navLayout); setMenuOpen(false); }, [navLayout]);
-  React.useEffect(() => { const onHash = () => { void (async () => { const next = initialView(); if (next !== viewRef.current && dirty.current) { if (!(await confirm('当前修改尚未保存，确定离开吗？', { confirmLabel: '放弃修改', destructive: true }))) { location.hash = viewRef.current; return; } dirty.current = false; } setView(next); })(); }; window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, [confirm]);
+  React.useEffect(() => { const onHash = () => { void (async () => { const next = initialView(); if (next !== viewRef.current && dirty.current) { if (!(await confirm('当前修改尚未保存，确定离开吗？', { confirmLabel: '放弃修改', destructive: true }))) { location.hash = viewRef.current; return; } dirty.current = false; } leaveHelpOnlyMaster(viewRef.current, next); setView(next); })(); }; window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash); }, [confirm]);
   React.useEffect(() => { const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.current) event.preventDefault(); }; window.addEventListener('beforeunload', beforeUnload); return () => window.removeEventListener('beforeunload', beforeUnload); }, []);
-  const selectBot = async (next: string) => { if (next !== bot && dirty.current) { if (!(await confirm('当前修改尚未保存，确定切换账号吗？', { confirmLabel: '放弃修改', destructive: true }))) return false; dirty.current = false; } setBot(next); if (standalone) sessionStorage.setItem('olivadice-bot', next); notify(''); return true; };
-  const navigate = async (next: View) => { if (next !== view && dirty.current) { if (!(await confirm('当前修改尚未保存，确定离开吗？', { confirmLabel: '放弃修改', destructive: true }))) return; dirty.current = false; } if (needsBot(next) && bot === 'unity') { const first = accounts.find(item => item.hash !== 'unity'); if (first) await selectBot(first.hash); } setView(next); location.hash = next; setMenuOpen(false); notify(''); };
-  const logout = async () => { if (dirty.current) { if (!(await confirm('当前修改尚未保存，确定退出吗？', { confirmLabel: '放弃修改', destructive: true }))) return; dirty.current = false; } sessionStorage.removeItem('olivadice-token'); connectedOnce.current = false; setToken(''); setConnected(false); setAccounts([]); setVersion(''); setInputToken(''); notify(''); };
+  const onlineBot = (hash: string) => accounts.some(item => item.hash === hash);
+  const offlineMasterOf = (slave: string) => {
+    const link = relations.relations.find(item => item.slave === slave && !item.masterOnline);
+    return link && !onlineBot(link.master) ? link.master : '';
+  };
+  const helpAnchorSlave = onlineBot(bot) ? bot : helpReturnBot.current;
+  const helpOnlyMaster = view === 'help' ? offlineMasterOf(helpAnchorSlave) : '';
+  const applyBot = (next: string) => {
+    setBot(next);
+    if (standalone && onlineBot(next)) sessionStorage.setItem('olivadice-bot', next);
+  };
+  const leaveHelpOnlyMaster = (from: View, to: View) => {
+    if (from !== 'help' || to === 'help') return '';
+    const returnTo = helpReturnBot.current;
+    helpReturnBot.current = '';
+    const currentBot = botRef.current;
+    const listed = accountsRef.current;
+    if (listed.some(item => item.hash === currentBot) || !returnTo || !listed.some(item => item.hash === returnTo)) return '';
+    setBot(returnTo);
+    if (standalone) sessionStorage.setItem('olivadice-bot', returnTo);
+    return returnTo;
+  };
+  const selectBot = async (next: string) => {
+    if (next !== bot && next !== 'unity' && !onlineBot(next) && next !== helpOnlyMaster) return false;
+    if (next !== bot && dirty.current) { if (!(await confirm('当前修改尚未保存，确定切换账号吗？', { confirmLabel: '放弃修改', destructive: true }))) return false; dirty.current = false; }
+    if (view === 'help' && next === helpOnlyMaster && next && onlineBot(bot)) helpReturnBot.current = bot;
+    else if (onlineBot(next)) helpReturnBot.current = '';
+    applyBot(next); notify(''); return true;
+  };
+  const navigate = async (next: View) => { if (next !== view && dirty.current) { if (!(await confirm('当前修改尚未保存，确定离开吗？', { confirmLabel: '放弃修改', destructive: true }))) return; dirty.current = false; } const restored = leaveHelpOnlyMaster(view, next); const active = restored || bot; if (needsBot(next) && (active === 'unity' || !onlineBot(active))) { const first = accounts.find(item => item.hash !== 'unity'); if (first) applyBot(first.hash); } setView(next); location.hash = next; setMenuOpen(false); notify(''); };
+  const logout = async () => { if (dirty.current) { if (!(await confirm('当前修改尚未保存，确定退出吗？', { confirmLabel: '放弃修改', destructive: true }))) return; dirty.current = false; } sessionStorage.removeItem('olivadice-token'); connectedOnce.current = false; helpReturnBot.current = ''; setToken(''); setConnected(false); setAccounts([]); setVersion(''); setInputToken(''); notify(''); };
+  const pageOnlyMaster = Boolean(helpOnlyMaster && bot === helpOnlyMaster);
   const current = accounts.find(account => account.hash === bot);
+  const slaveMaster = relations.relations.find(item => item.slave === bot)?.master || '';
   if (!connected) return <div className="min-h-screen bg-background text-foreground">
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-4 py-10 md:px-8">
       <Notice message={notice.message} error={notice.error} onClose={() => notify('')} />
@@ -145,10 +181,16 @@ export function OlivaDiceApp() {
       </div>
     </main>
   </div>;
-  const accountSelect = (mobile = false) => <div className={mobile ? 'sm:hidden' : 'hidden sm:block'}><Select ariaLabel={mobile ? '移动端账号选择' : '当前账号'} size="sm" className="w-56" value={bot} onChange={value => void selectBot(value)} options={accounts.map(account => ({ value: account.hash, label: account.label }))} /></div>;
+  const accountOptions = [
+    ...accounts.map(account => ({ value: account.hash, label: account.label })),
+    ...(helpOnlyMaster && !accounts.some(account => account.hash === helpOnlyMaster)
+      ? [{ value: helpOnlyMaster, label: `未启用主账号 · ${helpOnlyMaster.slice(0, 8)}…（仅本页）` }]
+      : []),
+  ];
+  const accountSelect = (mobile = false) => <div className={mobile ? 'sm:hidden' : 'hidden sm:block'}><Select ariaLabel={mobile ? '移动端账号选择' : '当前账号'} size="sm" className="w-64" value={bot} onChange={value => void selectBot(value)} options={accountOptions} /></div>;
   const controls = () => <div className="flex items-center gap-1">{accountSelect()}<Button size="icon" variant="ghost" onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? '切换为浅色模式' : '切换为深色模式'}>{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</Button><Button size="icon" variant="ghost" onClick={() => setNavLayout(value => value === 'side' ? 'top' : 'side')} title={navLayout === 'side' ? '切换为顶部导航' : '切换为左侧导航'}>{navLayout === 'side' ? <PanelTop className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}</Button><Button size="icon" variant="ghost" onClick={() => void connect(token)} title="刷新账号列表"><RotateCcw className="h-4 w-4" /></Button>{standalone && <Button size="icon" variant="ghost" onClick={() => void logout()} title="退出管理"><LogOut className="h-4 w-4" /></Button>}</div>;
-  const globalScope = view === 'backup' || view === 'server' || !current || bot === 'unity';
-  const scopeLabel = globalScope ? '全局设置' : (current?.label || '全局设置');
+  const globalScope = view === 'backup' || view === 'server' || (!current && !pageOnlyMaster) || bot === 'unity';
+  const scopeLabel = pageOnlyMaster ? '未启用主账号（仅本页）' : globalScope ? '全局设置' : (current?.label || '全局设置');
   const scopeBadge = <span className="inline-flex items-center gap-1.5"><span>当前范围：</span><span className={globalScope ? 'font-semibold text-rose-600 dark:text-rose-400' : 'font-semibold text-emerald-600 dark:text-amber-300'}>{scopeLabel}</span></span>;
   const page = <main className="mx-auto max-w-[1440px] px-4 py-6 md:px-8 md:py-8"><div className="mb-4 flex min-h-9 items-center justify-between gap-3 text-xs text-muted-foreground">{scopeBadge}{connected && accountSelect(true)}</div>
     <Notice message={notice.message} error={notice.error} onClose={() => notify('')} />
@@ -157,7 +199,7 @@ export function OlivaDiceApp() {
     {view === 'settings' && <SettingsPage token={token} bot={bot} notify={notify} />}
     {view === 'replies' && (bot === 'unity' ? <SelectAccount accounts={accounts} selectBot={selectBot} /> : <RepliesPage token={token} bot={bot} notify={notify} onDirtyChange={onDirtyChange} />)}
     {view === 'chance-custom' && <ChanceCustomPage token={token} bot={bot} notify={notify} onDirtyChange={onDirtyChange} />}
-    {view === 'help' && (bot === 'unity' ? <SelectAccount accounts={accounts} selectBot={selectBot} /> : <HelpPage token={token} bot={bot} notify={notify} onDirtyChange={onDirtyChange} />)}
+    {view === 'help' && (bot === 'unity' ? <SelectAccount accounts={accounts} selectBot={selectBot} /> : <HelpPage token={token} bot={bot} notify={notify} onDirtyChange={onDirtyChange} masterHash={slaveMaster} pageOnlyMaster={pageOnlyMaster} returnAccountLabel={accounts.find(item => item.hash === helpAnchorSlave)?.label || helpAnchorSlave} />)}
     {view === 'decks' && <DecksPage token={token} bot={bot} notify={notify} />}
     {view === 'backup' && <BackupPage token={token} notify={notify} />}
     {standalone && view === 'server' && <ServerPage token={token} notify={notify} onDirtyChange={onDirtyChange} />}

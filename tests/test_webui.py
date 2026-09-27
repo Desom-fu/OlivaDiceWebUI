@@ -62,6 +62,7 @@ class WebUITest(unittest.TestCase):
         fake.helpDocData = types.SimpleNamespace(
             dictHelpDoc={'bot-1': {'default': '帮助'}},
             dictHelpDocDefault={'bot-1': {}},
+            dictHelpDocTemp={'default': '帮助'},
         )
         fake.helpDoc = types.SimpleNamespace(
             setHelpDocByBotHash=lambda bot, key, value: (
@@ -70,6 +71,7 @@ class WebUITest(unittest.TestCase):
             delHelpDocByBotHash=lambda bot, key: (
                 fake.helpDocData.dictHelpDoc[bot].pop(key),
                 fake.helpDocData.dictHelpDocDefault[bot].pop(key)),
+            saveHelpDocByBotHash=lambda bot: self.saved_replies.append(('help', bot)),
         )
         fake.drawCardData = types.SimpleNamespace(
             dictDeckTemp={'基础': ['X']},
@@ -293,6 +295,74 @@ class WebUITest(unittest.TestCase):
             'passDay': 2, 'backupTime': '05:00:00', 'maxBackupCount': 3})['settings']['passDay'], 2)
         with self.assertRaises(service.InvalidInput):
             service.set_backup(proc, {'isBackup': 1})
+
+    def test_help_import_export_only_touches_current_account(self):
+        original = FakeProc.Proc_data
+        FakeProc.Proc_data = {'bot_info_dict': {
+            'bot-1': types.SimpleNamespace(id='123', platform={'platform': 'qq', 'model': 'onebot'}),
+            'bot-2': types.SimpleNamespace(id='456', platform={'platform': 'qq', 'model': 'onebot'}),
+        }}
+        self.fake.helpDocData.dictHelpDoc['bot-2'] = {'default': '帮助2'}
+        self.fake.helpDocData.dictHelpDocDefault['bot-2'] = {}
+        proc = FakeProc()
+        try:
+            service.set_help_doc(proc, 'bot-1', '自定义', '账号一')
+            self.assertEqual(service.export_help_docs(proc, 'bot-1'), {'自定义': '账号一'})
+            self.assertEqual(service.export_help_docs(proc, 'bot-2'), {})
+            service.import_help_docs(proc, 'bot-2', {'helpdoc': {'导入词': '账号二'}})
+            self.assertEqual(service.export_help_docs(proc, 'bot-2'), {'导入词': '账号二'})
+            self.assertEqual(service.export_help_docs(proc, 'bot-1'), {'自定义': '账号一'})
+            self.assertEqual(self.fake.helpDocData.dictHelpDoc['bot-1']['自定义'], '账号一')
+            self.assertNotIn('导入词', self.fake.helpDocData.dictHelpDoc['bot-1'])
+            exported = bridge.request(proc, {'method': 'GET', 'path': '/api/help/export?bot=bot-1'})
+            self.assertEqual(exported['docs'], {'自定义': '账号一'})
+            bridge.request(proc, {'method': 'POST', 'path': '/api/help/manage',
+                                  'data': {'bot': 'bot-1', 'action': 'import', 'data': {'extra': '更多'}}})
+            self.assertEqual(service.export_help_docs(proc, 'bot-1')['extra'], '更多')
+            self.assertNotIn('extra', service.export_help_docs(proc, 'bot-2'))
+            with self.assertRaises(service.InvalidInput):
+                bridge.request(proc, {'method': 'POST', 'path': '/api/help/manage',
+                                      'data': {'bot': 'bot-1', 'action': 'reset'}})
+        finally:
+            FakeProc.Proc_data = original
+
+    def test_help_modified_compares_default_text(self):
+        proc = FakeProc()
+        docs = {item['key']: item for item in service.help_docs(proc, 'bot-1')}
+        self.assertFalse(docs['default']['modified'])
+        self.assertEqual(docs['default']['default'], '帮助')
+        self.fake.helpDocData.dictHelpDoc['bot-1']['default'] = '覆盖'
+        self.fake.helpDocData.dictHelpDocDefault['bot-1']['default'] = '覆盖'
+        docs = {item['key']: item for item in service.help_docs(proc, 'bot-1')}
+        self.assertTrue(docs['default']['modified'])
+        self.fake.helpDocData.dictHelpDocDefault['bot-1']['default'] = '帮助'
+        self.fake.helpDocData.dictHelpDoc['bot-1']['default'] = '帮助'
+        docs = {item['key']: item for item in service.help_docs(proc, 'bot-1')}
+        self.assertFalse(docs['default']['modified'])
+        self.assertTrue(docs['default']['custom'])
+        service.set_help_doc(proc, 'bot-1', '新词条', '内容')
+        extra = next(item for item in service.help_docs(proc, 'bot-1') if item['key'] == '新词条')
+        self.assertTrue(extra['modified'])
+        self.assertIsNone(extra['default'])
+
+    def test_offline_master_help_docs_are_editable(self):
+        proc = FakeProc()
+        self.fake.console.getAllAccountRelations = lambda: {'offline-master': ['bot-1']}
+        self.fake.helpDocData.dictHelpDocTemp = {'default': '内置'}
+        path = Path(self.temp_dir.name) / 'offline-master' / 'console'
+        path.mkdir(parents=True)
+        (path / 'helpdocDefault.json').write_text(
+            json.dumps({'自定义': '离线主账号'}, ensure_ascii=False), encoding='utf-8')
+        docs = service.help_docs(proc, 'offline-master')
+        self.assertEqual({item['key']: item['value'] for item in docs},
+                         {'default': '内置', '自定义': '离线主账号'})
+        self.assertTrue(next(item for item in docs if item['key'] == '自定义')['custom'])
+        self.assertEqual(service.set_help_doc(proc, 'offline-master', '新增', '仅帮助页'), '仅帮助页')
+        self.assertEqual(service.export_help_docs(proc, 'offline-master')['新增'], '仅帮助页')
+        with self.assertRaises(service.InvalidInput):
+            service.help_docs(proc, 'unknown-bot')
+        with self.assertRaises(service.InvalidInput):
+            service.set_reply(proc, 'offline-master', 'strHello', 'x')
 
     def test_offline_accounts_can_link_and_unlink(self):
         proc = FakeProc()
