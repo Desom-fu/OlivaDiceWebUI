@@ -24,8 +24,25 @@ def beijing_day(now=None):
         ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d')
 
 
+def release_version(day, number):
+    return '{}.{}.{:02d}'.format(day[2:4], day[4:], number)
+
+
+def release_svn(day, number):
+    return int('{}{:02d}'.format(day, number))
+
+
+def parse_release_version(version):
+    match = re.fullmatch(r'(\d{2})\.(\d{4})\.(\d+)', version)
+    if not match:
+        raise ValueError('Invalid release version: {}'.format(version))
+    year = 2000 + int(match.group(1))
+    return version, int('{}{}{:02d}'.format(year, match.group(2), int(match.group(3))))
+
+
 def next_build_number(refs, day):
-    pattern = re.compile(r'^refs/tags/v' + re.escape(day) + r'\(([1-9]\d*)\)$')
+    prefix = '{}.{}'.format(day[2:4], day[4:])
+    pattern = re.compile(r'^refs/tags/v' + re.escape(prefix) + r'\.(\d+)$')
     numbers = [int(match.group(1)) for ref in refs if (match := pattern.fullmatch(ref))]
     return max(numbers, default=0) + 1
 
@@ -44,8 +61,7 @@ def identify_archive(source):
 
 def stamp_archive(source, version):
     """Return a fixed-name OPK whose manifest contains the exact release version."""
-    if not re.fullmatch(r'\d{8}\([1-9]\d*\)', version):
-        raise ValueError('Invalid release version: {}'.format(version))
+    version, svn = parse_release_version(version)
     _, base_name, _ = identify_archive(source)
     # The asset label carries the timestamped version while downloads keep this stable filename.
     target = source.with_name('{}.opk'.format(base_name))
@@ -58,6 +74,7 @@ def stamp_archive(source, version):
                 if item.filename == MANIFEST_PATH:
                     manifest = json.loads(data)
                     manifest['version'] = version
+                    manifest['svn'] = svn
                     data = (json.dumps(manifest, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
                     found_manifest = True
                 stamped.writestr(item, data)
@@ -77,11 +94,12 @@ def gh(*args, check=True):
 
 
 def reserve_tag(repo, sha, day):
-    refs = gh('api', 'repos/{}/git/matching-refs/tags/v{}'.format(repo, day),
+    prefix = '{}.{}'.format(day[2:4], day[4:])
+    refs = gh('api', 'repos/{}/git/matching-refs/tags/v{}'.format(repo, prefix),
               '--paginate', '--jq', '.[].ref').stdout.splitlines()
     number = next_build_number(refs, day)
     while True:
-        tag = 'v{}({})'.format(day, number)
+        tag = 'v{}'.format(release_version(day, number))
         created = gh('api', '-X', 'POST', 'repos/{}/git/refs'.format(repo),
                      '-f', 'ref=refs/tags/' + tag, '-f', 'sha=' + sha, check=False)
         if created.returncode == 0:

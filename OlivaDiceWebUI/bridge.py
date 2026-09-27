@@ -83,6 +83,8 @@ def _get(proc, path, query):
         return service.relations(proc)
     if path == '/api/help':
         return {'docs': service.help_docs(proc, bot_hash)}
+    if path == '/api/help/export':
+        return {'docs': service.export_help_docs(proc, bot_hash)}
     if path == '/api/decks':
         return {'decks': service.decks(proc, bot_hash),
                 'groupCount': service.deck_group_count(proc, bot_hash)}
@@ -123,6 +125,10 @@ def _post(proc, path, data):
     elif path == '/api/help':
         result = service.set_help_doc(proc, bot_hash, data.get('key'), data.get('value'),
                                       data.get('action') == 'delete')
+    elif path == '/api/help/manage':
+        if data.get('action') != 'import':
+            raise service.InvalidInput('帮助文档操作无效')
+        result = service.import_help_docs(proc, bot_hash, data.get('data'))
     elif path == '/api/decks/reload':
         result = service.reload_decks(proc)
     elif path == '/api/backup':

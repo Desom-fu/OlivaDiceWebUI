@@ -223,3 +223,52 @@
 .dark .bg-amber-50 { background-color: rgb(69 26 3 / 0.55); }
 .dark .text-amber-900 { color: rgb(253 230 138); }
 .dark .border-amber-200 { border-color: rgb(146 64 14); }
+
+/* ChanceCustom syntax overlay. The textarea itself stays transparent so the
+   coloured replica underneath is what the user reads; caret and selection stay
+   on the real control. Nesting depth only recolors brackets and function names. */
+.chance-editor {
+  color: transparent;
+  caret-color: hsl(var(--foreground));
+  -webkit-text-fill-color: transparent;
+}
+.chance-editor::placeholder {
+  color: rgb(148 163 184);
+  -webkit-text-fill-color: rgb(148 163 184);
+}
+.chance-editor::selection {
+  color: transparent;
+  background: rgb(14 165 233 / 0.28);
+  -webkit-text-fill-color: transparent;
+}
+.dark .chance-editor::placeholder {
+  color: rgb(148 163 184);
+  -webkit-text-fill-color: rgb(148 163 184);
+}
+.chance-highlight .cc-text { color: hsl(var(--foreground)); }
+.chance-highlight .cc-func { font-weight: 600; }
+.chance-highlight .cc-bracket { font-weight: 700; }
+.chance-highlight .cc-d0.cc-bracket,
+.chance-highlight .cc-d0.cc-func { color: #0284c7; }
+.chance-highlight .cc-d1.cc-bracket,
+.chance-highlight .cc-d1.cc-func { color: #7c3aed; }
+.chance-highlight .cc-d2.cc-bracket,
+.chance-highlight .cc-d2.cc-func { color: #0f766e; }
+.chance-highlight .cc-d3.cc-bracket,
+.chance-highlight .cc-d3.cc-func { color: #c2410c; }
+.chance-highlight .cc-sep { color: #d97706; font-weight: 700; }
+.chance-highlight .cc-split { color: #e11d48; font-weight: 700; }
+.chance-highlight .cc-escape { color: #64748b; }
+.chance-highlight .cc-code { color: #0891b2; }
+.dark .chance-highlight .cc-d0.cc-bracket,
+.dark .chance-highlight .cc-d0.cc-func { color: #7dd3fc; }
+.dark .chance-highlight .cc-d1.cc-bracket,
+.dark .chance-highlight .cc-d1.cc-func { color: #c4b5fd; }
+.dark .chance-highlight .cc-d2.cc-bracket,
+.dark .chance-highlight .cc-d2.cc-func { color: #5eead4; }
+.dark .chance-highlight .cc-d3.cc-bracket,
+.dark .chance-highlight .cc-d3.cc-func { color: #fdba74; }
+.dark .chance-highlight .cc-sep { color: #fbbf24; }
+.dark .chance-highlight .cc-split { color: #fb7185; }
+.dark .chance-highlight .cc-escape { color: #94a3b8; }
+.dark .chance-highlight .cc-code { color: #67e8f9; }

@@ -436,6 +436,8 @@ def handler_factory(proc, token):
                     self._send(200, service.relations(proc))
                 elif path.path == '/api/help':
                     self._send(200, {'docs': service.help_docs(proc, bot_hash)})
+                elif path.path == '/api/help/export':
+                    self._send(200, {'docs': service.export_help_docs(proc, bot_hash)})
                 elif path.path == '/api/decks':
                     self._send(200, {'decks': service.decks(proc, bot_hash),
                                      'groupCount': service.deck_group_count(proc, bot_hash)})
@@ -509,6 +511,10 @@ def handler_factory(proc, token):
                     result = service.change_relation(proc, data.get('action'), data.get('slave'), data.get('master'))
                 elif path == '/api/help':
                     result = service.set_help_doc(proc, bot_hash, data.get('key'), data.get('value'), data.get('action') == 'delete')
+                elif path == '/api/help/manage':
+                    if data.get('action') != 'import':
+                        raise service.InvalidInput('帮助文档操作无效')
+                    result = service.import_help_docs(proc, bot_hash, data.get('data'))
                 elif path == '/api/decks/reload':
                     result = service.reload_decks(proc)
                 elif path == '/api/backup':
