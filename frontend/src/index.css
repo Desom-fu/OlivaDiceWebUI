@@ -224,23 +224,27 @@
 .dark .text-amber-900 { color: rgb(253 230 138); }
 .dark .border-amber-200 { border-color: rgb(146 64 14); }
 
-/* ChanceCustom syntax overlay. The textarea itself stays transparent so the
-   coloured replica underneath is what the user reads; caret and selection stay
-   on the real control. Nesting depth only recolors brackets and function names. */
+/* Syntax overlay. The textarea itself stays transparent so the coloured replica
+   underneath is what the user reads; caret and selection stay on the real
+   control. ChanceCustom nesting depth only recolors brackets and function names. */
+.syntax-editor,
 .chance-editor {
   color: transparent;
   caret-color: hsl(var(--foreground));
   -webkit-text-fill-color: transparent;
 }
+.syntax-editor::placeholder,
 .chance-editor::placeholder {
   color: rgb(148 163 184);
   -webkit-text-fill-color: rgb(148 163 184);
 }
+.syntax-editor::selection,
 .chance-editor::selection {
   color: transparent;
   background: rgb(14 165 233 / 0.28);
   -webkit-text-fill-color: transparent;
 }
+.dark .syntax-editor::placeholder,
 .dark .chance-editor::placeholder {
   color: rgb(148 163 184);
   -webkit-text-fill-color: rgb(148 163 184);
@@ -272,3 +276,19 @@
 .dark .chance-highlight .cc-split { color: #fb7185; }
 .dark .chance-highlight .cc-escape { color: #94a3b8; }
 .dark .chance-highlight .cc-code { color: #67e8f9; }
+
+.reply-highlight .rv-text { color: hsl(var(--foreground)); }
+.reply-highlight .rv-brace { color: #0284c7; font-weight: 700; }
+.reply-highlight .rv-var { color: #0284c7; font-weight: 600; }
+.reply-highlight .rv-special { color: #d97706; font-weight: 700; }
+.reply-highlight .rv-escape { color: #64748b; }
+.reply-highlight .rv-deck { color: #0f766e; font-weight: 600; }
+.reply-highlight .rv-split { color: #e11d48; font-weight: 700; }
+.reply-highlight .rv-open { color: #94a3b8; }
+.dark .reply-highlight .rv-brace,
+.dark .reply-highlight .rv-var { color: #7dd3fc; }
+.dark .reply-highlight .rv-special { color: #fbbf24; }
+.dark .reply-highlight .rv-escape { color: #94a3b8; }
+.dark .reply-highlight .rv-deck { color: #5eead4; }
+.dark .reply-highlight .rv-split { color: #fb7185; }
+.dark .reply-highlight .rv-open { color: #64748b; }
