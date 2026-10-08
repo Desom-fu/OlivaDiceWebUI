@@ -9,7 +9,7 @@ import { SyntaxEditor } from './syntaxEditor';
  * Nesting depth only changes the colour of brackets and function names.
  */
 
-export type TokenKind = 'text' | 'bracket' | 'func' | 'sep' | 'split' | 'escape' | 'code';
+export type TokenKind = 'text' | 'bracket' | 'func' | 'sep' | 'split' | 'escape' | 'code' | 'open';
 export type Token = { k: TokenKind; v: string; d: number };
 
 const ESCAPES = ['#zzk', '#yzk', '#fgf', '#xh', '#hz', '#jh'];
@@ -122,7 +122,7 @@ function parsePlain(src: string, tokens: Token[], from: number, end: number, dep
 
 function parseFunc(src: string, tokens: Token[], from: number, end: number, depth: number): number {
   const close = matchingEnd(src, from, end);
-  emit(tokens, 'bracket', '【', depth);
+  emit(tokens, close === -1 ? 'open' : 'bracket', '【', depth);
   let i = from + 1;
   const bound = close === -1 ? end : close;
   const name = matchFunc(src, i, bound);

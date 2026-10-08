@@ -36,16 +36,10 @@ export function SyntaxEditor({
     preRef.current.scrollTop = areaRef.current.scrollTop;
     preRef.current.scrollLeft = areaRef.current.scrollLeft;
   };
+  React.useLayoutEffect(sync);
   return (
-    <div className={wrapperClassName}>
-      <pre
-        ref={preRef}
-        aria-hidden
-        className={cn(
-          highlightClass,
-          'pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap break-words rounded-md border border-transparent px-3 py-2 font-mono text-sm leading-6',
-        )}
-      >
+    <div className={cn('syntax-stack', wrapperClassName)}>
+      <pre ref={preRef} aria-hidden className={cn('syntax-highlight', highlightClass)}>
         {tokens.map((token, index) => (
           <span key={index} className={token.className}>{token.v}</span>
         ))}
@@ -61,10 +55,7 @@ export function SyntaxEditor({
         spellCheck={false}
         onScroll={sync}
         onChange={event => onChange(event.target.value)}
-        className={cn(
-          'syntax-editor relative z-10 resize-y whitespace-pre-wrap break-words bg-transparent font-mono text-sm leading-6',
-          className,
-        )}
+        className={cn('syntax-editor', className)}
       />
     </div>
   );

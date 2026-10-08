@@ -857,6 +857,8 @@ class WebUITest(unittest.TestCase):
         self.assertIn('aria-modal', html)
         self.assertIn('reply-highlight', html)
         self.assertIn('rv-var', html)
+        self.assertIn('rv-d1', html)
+        self.assertIn('cc-open', html)
         frontend = Path(__file__).parents[1] / 'frontend/src/olivadice'
         self.assertFalse(any('window.confirm(' in source.read_text(encoding='utf-8')
                              for source in frontend.rglob('*.tsx')))
