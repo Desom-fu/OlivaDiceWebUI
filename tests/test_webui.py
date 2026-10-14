@@ -1,4 +1,5 @@
 import base64
+import errno
 import http.client
 import io
 import json
@@ -524,6 +525,73 @@ class WebUITest(unittest.TestCase):
         self.assertEqual(standalone_server.DEFAULT_NETWORK['bind'], '0.0.0.0')
         self.assertEqual(standalone_server.DEFAULT_NETWORK['port'], 8765)
         self.assertEqual(standalone_server.DEFAULT_NETWORK['publicOrigin'], '')
+
+    def test_standalone_port_conflict_advances_and_persists_across_restart(self):
+        original_port = standalone_server.PORT
+        original_network_file = standalone_server.NETWORK_FILE
+        standalone_server.PORT = 8765
+        standalone_server.NETWORK_FILE = Path(self.temp_dir.name) / 'network.json'
+        port_env = standalone_server.ENV_NETWORK['port']
+        try:
+            with patch.dict(os.environ, {}, clear=False) as environment:
+                environment.pop(port_env, None)
+                first_server = object()
+                with patch.object(standalone_server, 'ThreadingHTTPServer',
+                                  side_effect=[OSError(errno.EADDRINUSE, 'port in use'), first_server]) as factory:
+                    httpd, selected_port, warning = standalone_server._bind_available_server(object())
+
+                self.assertIs(httpd, first_server)
+                self.assertEqual(selected_port, 8766)
+                self.assertEqual(standalone_server.PORT, 8766)
+                self.assertEqual(warning, '')
+                self.assertEqual([call.args[0][1] for call in factory.call_args_list], [8765, 8766])
+                self.assertEqual(standalone_server._read_network()['port'], 8766)
+                self.assertEqual(standalone_main._local_url(), 'http://127.0.0.1:8766/')
+
+                # Simulate a restart after another instance has freed 8765. The saved
+                # 8766 is tried first, so startup order cannot steal this instance's port.
+                standalone_server.PORT = standalone_server._read_network()['port']
+                restarted_server = object()
+                with patch.object(standalone_server, 'ThreadingHTTPServer',
+                                  return_value=restarted_server) as restart_factory:
+                    httpd, selected_port, warning = standalone_server._bind_available_server(object())
+                self.assertIs(httpd, restarted_server)
+                self.assertEqual(selected_port, 8766)
+                self.assertEqual(restart_factory.call_args.args[0][1], 8766)
+                self.assertEqual(warning, '')
+        finally:
+            standalone_server.PORT = original_port
+            standalone_server.NETWORK_FILE = original_network_file
+
+    def test_standalone_port_conflict_with_environment_override_warns_not_to_persist(self):
+        original_port = standalone_server.PORT
+        original_network_file = standalone_server.NETWORK_FILE
+        standalone_server.PORT = 8765
+        standalone_server.NETWORK_FILE = Path(self.temp_dir.name) / 'network-with-env.json'
+        port_env = standalone_server.ENV_NETWORK['port']
+        try:
+            with patch.dict(os.environ, {port_env: '8765'}, clear=False):
+                with patch.object(standalone_server, 'ThreadingHTTPServer',
+                                  side_effect=[OSError(errno.EADDRINUSE, 'port in use'), object()]):
+                    _, selected_port, warning = standalone_server._bind_available_server(object())
+                self.assertEqual(selected_port, 8766)
+                self.assertIn(port_env, warning)
+                self.assertFalse(standalone_server.NETWORK_FILE.exists())
+        finally:
+            standalone_server.PORT = original_port
+            standalone_server.NETWORK_FILE = original_network_file
+
+    def test_standalone_port_binding_only_retries_address_in_use(self):
+        original_port = standalone_server.PORT
+        standalone_server.PORT = 8765
+        try:
+            with patch.object(standalone_server, 'ThreadingHTTPServer',
+                              side_effect=OSError(errno.EACCES, 'permission denied')) as factory:
+                with self.assertRaises(OSError):
+                    standalone_server._bind_available_server(object())
+            self.assertEqual(factory.call_count, 1)
+        finally:
+            standalone_server.PORT = original_port
 
     def test_standalone_wildcard_bind_without_public_origin(self):
         """A wildcard listener must be usable for plain LAN access with no domain."""

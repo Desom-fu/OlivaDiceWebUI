@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import errno
 import hmac
 import ipaddress
 import json
@@ -287,17 +288,36 @@ def save_network(value):
     validated = _validate_network(value)
     _effective_network(validated)
     with _network_lock:
-        NETWORK_FILE.parent.mkdir(parents=True, exist_ok=True)
-        fd, name = tempfile.mkstemp(prefix='network-', suffix='.tmp', dir=NETWORK_FILE.parent)
-        temporary = Path(name)
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-                json.dump(validated, stream, ensure_ascii=False, indent=2)
-                stream.write('\n')
-            os.replace(temporary, NETWORK_FILE)
-        finally:
-            temporary.unlink(missing_ok=True)
+        _write_network_file(validated)
         return _snapshot_network()
+
+
+def _write_network_file(value):
+    NETWORK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix='network-', suffix='.tmp', dir=NETWORK_FILE.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.write('\n')
+        os.replace(temporary, NETWORK_FILE)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _persist_runtime_port(port):
+    port_env = ENV_NETWORK['port']
+    if port_env in os.environ:
+        return '{} 已覆盖页面保存的端口，自动顺延端口 {} 无法固化；请为此实例调整该环境变量'.format(
+            port_env, port)
+    try:
+        with _network_lock:
+            saved = _read_network()
+            saved['port'] = port
+            _write_network_file(_validate_network(saved))
+    except (OSError, ValueError) as exc:
+        return '自动顺延到端口 {}，但无法写入 {}：{}'.format(port, NETWORK_FILE, exc)
+    return ''
 
 
 STARTUP_SAVED, STARTUP_NETWORK, STARTUP_NETWORK_WARNING = _startup_network()
@@ -336,6 +356,34 @@ def _token():
         pass
     os.replace(temporary, TOKEN_FILE)
     return token
+
+
+def _bind_available_server(handler, requested_port=None):
+    """Bind from the configured port upward and persist any automatically chosen port."""
+    global PORT
+    requested_port = PORT if requested_port is None else int(requested_port)
+    if not 1 <= requested_port <= 65535:
+        raise ValueError('WebUI 端口必须在 1–65535 之间')
+
+    for port in range(requested_port, 65536):
+        try:
+            httpd = ThreadingHTTPServer((BIND_HOST, port), handler)
+        except OSError as exc:
+            if (exc.errno != errno.EADDRINUSE and exc.errno != 10048
+                    and getattr(exc, 'winerror', None) != 10048):
+                raise
+            if port == 65535:
+                raise
+            continue
+
+        if port != requested_port:
+            PORT = port
+            warning = _persist_runtime_port(port)
+        else:
+            warning = ''
+        return httpd, port, warning
+
+    raise OSError(errno.EADDRINUSE, 'WebUI 没有可用监听端口')
 
 
 def plugin_version():
@@ -594,10 +642,17 @@ def start(proc):
     if STARTUP_NETWORK_WARNING:
         proc.log(4, 'OlivaDiceWebUIStandalone: {}'.format(STARTUP_NETWORK_WARNING))
     token = _token()
-    _server = ThreadingHTTPServer((BIND_HOST, PORT), handler_factory(proc, token))
+    requested_port = PORT
+    _server, bound_port, port_warning = _bind_available_server(
+        handler_factory(proc, token), requested_port)
     _server.daemon_threads = True
     _thread = threading.Thread(target=_server.serve_forever, name='OlivaDiceWebUIStandalone', daemon=True)
     _thread.start()
+    if bound_port != requested_port:
+        proc.log(2, 'OlivaDiceWebUIStandalone: 端口 {} 已占用，自动顺延到 {}'.format(
+            requested_port, bound_port))
+    if port_warning:
+        proc.log(4, 'OlivaDiceWebUIStandalone: {}'.format(port_warning))
     proc.log(2, 'OlivaDiceWebUIStandalone: {}:{} 已启动；远程地址 {}；令牌文件 {}'.format(
         BIND_HOST, PORT, PUBLIC_ORIGIN or '未配置', TOKEN_FILE))
 

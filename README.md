@@ -43,7 +43,7 @@
 1. 安装 OlivOS 和 OlivaDiceCore。需要账号迁移、备份或牌堆市场时，再安装 OlivaDiceMaster / OlivaDiceOdyssey。
 2. 从 [最新 Release](https://github.com/OlivOS-Team/OlivaDiceWebUI/releases/latest) 选择下载：页面上的资产标签会显示时间戳版本号，实际下载文件为 `OlivaDiceWebUI.opk`（官方接入版）和 `OlivaDiceWebUIStandalone.opk`（独立服务版）。将所需 OPK 放入 OlivOS 的 `plugin/app` 目录后重启。两者注册名、namespace 和自身数据目录均不同，可以同时安装。
 3. 官方接入版：登录 OlivOS WebUI 后，从侧栏“插件页面”打开“青果骰管理”。不要单独打开插件 HTML；脱离宿主 iframe 时没有消息桥。
-4. 独立服务版：默认访问 `http://127.0.0.1:8765/`，管理令牌位于 `plugin/data/OlivaDiceWebUIStandalone/admin-token.txt`；监听设置保存在同目录的 `network.json`。
+4. 独立服务版：默认访问 `http://127.0.0.1:8765/`，管理令牌位于 `plugin/data/OlivaDiceWebUIStandalone/admin-token.txt`；监听设置保存在同目录的 `network.json`。若端口已被占用，服务会从配置端口开始向后查找可用端口，并把实际端口写回该文件，后续重启会优先使用这个端口。若设置了 `OLIVADICE_STANDALONE_WEBUI_PORT`，需修改环境变量来固定端口，因为它优先于页面设置。
 
 官方接入版的远程访问、端口和认证均由 OlivOS WebUI 统一配置；它运行在无同源权限的插件沙箱中，不能读取父页面 DOM、存储或令牌，也不直接使用 `fetch`、XHR 或 WebSocket。独立服务版则只使用自己的监听设置和管理令牌，不依赖 OlivOS WebUI。
 
